@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "can_ids.h"
+#include "pinout.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,7 +43,10 @@
 CAN_HandleTypeDef hcan1;
 
 /* USER CODE BEGIN PV */
-
+int blinker = 0;
+int left = 0;
+int right = 0;
+int emergency = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -56,31 +60,81 @@ static void MX_CAN1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 static void handle_can_fifo(uint32_t RxFifo) {
-	if (HAL_CAN_GetRxFifoFillLevel(&hcan1, RxFifo)) {
-		uint8_t data[8];
-		CAN_RxHeaderTypeDef header = {0,};
-		HAL_StatusTypeDef ret = HAL_CAN_GetRxMessage(
-			  &hcan1,
-			  RxFifo,
-			  &header,
-			  data
-		);
-		if (ret != HAL_OK) {
-			Error_Handler();
-			return;
-		}
-		if (header.StdId == 0) {
-			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
-		} else if (header.StdId == 1) {
-			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
-		} else if (header.StdId == 2) {
-			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
-		} else if (header.StdId == 3) {
-			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
-		} else if (header.StdId == 4) {
-			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
-		} else if (header.StdId == 5) {
-			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+	uint8_t data[8];
+	CAN_RxHeaderTypeDef header = {0,};
+
+	if (!HAL_CAN_GetRxFifoFillLevel(&hcan1, RxFifo)) return;
+
+	HAL_StatusTypeDef ret = HAL_CAN_GetRxMessage(
+		  &hcan1,
+		  RxFifo,
+		  &header,
+		  data
+	);
+	if (ret != HAL_OK) {
+		Error_Handler();
+		return;
+	}
+	switch(header.StdId) {
+	case CAN_ID_BACK_UP_LIGHTS:
+		setReverseLight(data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
+		break;
+	case CAN_ID_BLINKER:
+		blinker = data[0] ? 1 : 0;
+		break;
+	case CAN_ID_EMERGENCY_SWITCH:
+		emergency = data[0] ? 1 : 0;
+		break;
+	case CAN_ID_LEFT_TURN_SIGNALS:
+		left = data[0] ? 1 : 0;
+		break;
+	case CAN_ID_BRAKE_LIGHTS:
+		setBrakeLight(data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
+		break;
+	case CAN_ID_REVERSE_SWITCH:
+		setReverseLight(data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
+		break;
+	case CAN_ID_TAIL_LIGHTS:
+		setTailLight(data[0] ? GPIO_PIN_SET : GPIO_PIN_RESET);
+	}
+	setTurnSignalLight((blinker & left) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+static void handle_blink() {
+	uint32_t millis = HAL_GetTick();
+	static uint32_t prev = 0;
+	if (millis - prev > 1000) {
+		prev = millis;
+		static int state = 0;
+		state = !state;
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, state ? GPIO_PIN_SET : GPIO_PIN_RESET); // tail light
+
+		// For testing, send a packet at every blink
+		{
+		  const CAN_TxHeaderTypeDef header = {
+				  .StdId = 123,
+				  .IDE = CAN_ID_STD,
+				  .RTR = CAN_RTR_DATA,
+				  .DLC = 1, // 1 byte to send
+				  .TransmitGlobalTime = DISABLE
+		  };
+		  static uint8_t data[] = {0x55};
+		  uint32_t pTxMailbox = 0;
+		  HAL_StatusTypeDef ret = HAL_CAN_AddTxMessage(&hcan1, &header, data, &pTxMailbox);
+		  static uint32_t ok_count = 0;
+		  static uint32_t error_count = 0;
+		  static uint32_t busy_count = 0;
+		  static uint32_t timeout_count = 0;
+		  if (ret == HAL_OK) {
+			  ok_count++;
+		  } else if (ret == HAL_ERROR) {
+			  error_count++;
+		  } else if (ret == HAL_BUSY) {
+			  busy_count++;
+		  } else if (ret==HAL_TIMEOUT) {
+			  timeout_count++;
+		  }
 		}
 	}
 }
@@ -128,6 +182,9 @@ int main(void)
   }
   while (1)
   {
+	  HAL_CAN_IRQHandler(&hcan1);
+	  //handle_blink();
+
 	  handle_can_fifo(CAN_RX_FIFO0);
 	  handle_can_fifo(CAN_RX_FIFO1);
     /* USER CODE END WHILE */
@@ -176,8 +233,8 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV16;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
   {
@@ -201,11 +258,11 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 16;
+  hcan1.Init.Prescaler = 1;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_1TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_15TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_4TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = DISABLE;
   hcan1.Init.AutoWakeUp = DISABLE;
@@ -218,6 +275,69 @@ static void MX_CAN1_Init(void)
   }
   /* USER CODE BEGIN CAN1_Init 2 */
 
+  CAN_FilterTypeDef filter = {0,};
+	/* Specifies the filter identification number (MSBs for a 32-bit
+	configuration, first one for a 16-bit configuration).
+	This parameter must be a number between
+	Min_Data = 0x0000 and Max_Data = 0xFFFF. */
+	filter.FilterIdHigh =  0; // MY_STID << 5;
+
+	/* Specifies the filter identification number (LSBs for a 32-bit
+	configuration, second one for a 16-bit configuration).
+	This parameter must be a number between
+	Min_Data = 0x0000 and Max_Data = 0xFFFF. */
+	filter.FilterIdLow = CAN_RTR_DATA | CAN_ID_STD;
+
+	/* Specifies the FIFO (0 or 1U) which will be assigned to the filter.
+	This parameter can be a value of @ref CAN_filter_FIFO */
+	filter.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+
+	/* Specifies the filter bank which will be initialized.
+	For single CAN instance(14 dedicated filter banks),
+	this parameter must be a number between Min_Data = 0 and Max_Data = 13.
+	For dual CAN instances(28 filter banks shared),
+	this parameter must be a number between Min_Data = 0 and Max_Data = 27. */
+	filter.FilterBank = 0;
+
+	/* Specifies the filter mode to be initialized.
+	This parameter can be a value of @ref CAN_filter_mode */
+	filter.FilterMode = CAN_FILTERMODE_IDMASK;
+
+	/*!< Specifies the filter scale.
+	This parameter can be a value of @ref CAN_filter_scale */
+	filter.FilterScale = CAN_FILTERSCALE_32BIT;
+
+	/* Enable or disable the filter.
+	This parameter can be a value of @ref CAN_filter_activation */
+	filter.FilterActivation = CAN_FILTER_ENABLE;
+
+	/* Select the start filter bank for the slave CAN instance.
+	For single CAN instances, this parameter is meaningless.
+	For dual CAN instances, all filter banks with lower index are assigned to master
+	CAN instance, whereas all filter banks with greater index are assigned to slave
+	CAN instance.
+	This parameter must be a number between Min_Data = 0 and Max_Data = 27. */
+	filter.SlaveStartFilterBank = 14;
+
+  if (HAL_CAN_ConfigFilter(&hcan1, &filter) != HAL_OK) {
+	  Error_Handler();
+  }
+//  if (HAL_CAN_ActivateNotification(
+//		  &hcan1,
+//		  /* Transmit Interrupt */
+//		  CAN_IT_TX_MAILBOX_EMPTY |
+//		  /* Operating Mode Interrupts */
+//		  CAN_IT_WAKEUP |
+//		  CAN_IT_SLEEP_ACK |
+//		  /* Error Interrupts */
+//		  CAN_IT_ERROR_WARNING |
+//		  CAN_IT_ERROR_PASSIVE |
+//		  CAN_IT_BUSOFF |
+//		  CAN_IT_LAST_ERROR_CODE |
+//		  CAN_IT_ERROR
+//  ) != HAL_OK) {
+//	  Error_Handler();
+//  }
   /* USER CODE END CAN1_Init 2 */
 
 }

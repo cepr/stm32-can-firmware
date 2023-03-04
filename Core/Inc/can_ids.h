@@ -1,0 +1,18 @@
+#pragma once
+
+#define CAN_ID_BRAKE_LIGHTS 			0x10
+#define CAN_ID_BLINKER 					0x11
+#define CAN_ID_BACK_UP_LIGHTS			0x80
+#define CAN_ID_RIGHT_TURN_SIGNALS 		0x81
+#define CAN_ID_LEFT_TURN_SIGNALS 		0x82
+#define CAN_ID_TAIL_LIGHTS 				0x83
+#define CAN_ID_OIL_PRESSURE 			0x84
+#define CAN_ID_HEAD_TEMP 				0x85
+#define CAN_ID_REAR_LEFT_LIGHTS_STATUS 	0x86
+#define CAN_ID_REAR_RIGHT_LIGHTS_STATUS 0x87
+#define CAN_ID_REAR_LIGHTS_BRIGHTNESS 	0x88
+#define CAN_ID_LAMBDA 					0x89
+#define CAN_ID_VBAT 					0x8a
+#define CAN_ID_STARTER 					0x8b
+#define CAN_ID_REVERSE_SWITCH           0x8c
+#define CAN_ID_EMERGENCY_SWITCH         0x8d
